@@ -21,6 +21,7 @@ type OllamaAdapter struct {
 	embeddingModel string
 	maxTokens      int
 	temperature    float32
+	httpClient     *http.Client
 }
 
 // NewOllamaAdapter creates a new OllamaAdapter instance.
@@ -39,12 +40,23 @@ func NewOllamaAdapter(baseURL, model string, maxTokens int, temperature float32)
 		temperature = 0.7 // Default temperature
 	}
 
+	// Reuse one HTTP client with keep-alive to avoid connection churn and model reload latency
+	transport := &http.Transport{
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	client := &http.Client{Transport: transport, Timeout: 120 * time.Second}
+
 	return &OllamaAdapter{
 		baseURL:        baseURL,
 		model:          model,
 		embeddingModel: "nomic-embed-text:latest", // Default embedding model
 		maxTokens:      maxTokens,
 		temperature:    temperature,
+		httpClient:     client,
 	}, nil
 }
 
@@ -162,17 +174,13 @@ func (o *OllamaAdapter) Call(ctx context.Context, prompt Prompt) (Response, erro
 	if err != nil {
 		return Response{}, fmt.Errorf("failed to marshal request body: %w", err)
 	}
-	// Make the HTTP request with timeout
-	client := &http.Client{
-		Timeout: 30 * time.Second, // Add 30 second timeout
-	}
 	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/api/chat", o.baseURL), bytes.NewBuffer(payload))
 	if err != nil {
 		return Response{}, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := o.httpClient.Do(req)
 	if err != nil {
 		return Response{}, fmt.Errorf("HTTP request failed: %w", err)
 	}
@@ -299,8 +307,7 @@ func (o *OllamaAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 	req.Header.Set("Content-Type", "application/json")
 
 	// Make the request
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := o.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}

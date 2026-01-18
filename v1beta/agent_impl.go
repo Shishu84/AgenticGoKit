@@ -9,6 +9,10 @@ import (
 
 	"github.com/agenticgokit/agenticgokit/core"
 	"github.com/agenticgokit/agenticgokit/internal/llm"
+	"github.com/agenticgokit/agenticgokit/internal/observability"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // addMultimodalDataToPrompt adds multimodal data from RunOptions to an llm.Prompt.
@@ -266,6 +270,22 @@ func (a *realAgent) Run(ctx context.Context, input string) (*Result, error) {
 func (a *realAgent) execute(ctx context.Context, input string, opts *RunOptions) (*Result, error) {
 	startTime := time.Now()
 
+	tracer := observability.GetTracer("agk.v1beta.agent")
+	ctx, span := tracer.Start(ctx, "agk.agent.run",
+		trace.WithAttributes(
+			attribute.String(observability.AttrAgentName, a.config.Name),
+			attribute.String(observability.AttrLLMProvider, a.config.LLM.Provider),
+			attribute.String(observability.AttrLLMModel, a.config.LLM.Model),
+			attribute.Bool("agk.memory.enabled", a.memoryProvider != nil && a.config.Memory != nil),
+			attribute.Int("agk.tools.count", len(a.tools)),
+		),
+	)
+	defer span.End()
+
+	if sc := span.SpanContext(); sc.IsValid() {
+		ctx = context.WithValue(ctx, "trace_id", sc.TraceID().String())
+	}
+
 	// Validate that agent is properly initialized
 	if a.llmProvider == nil {
 		return nil, fmt.Errorf("agent not properly initialized: LLM provider is nil")
@@ -365,6 +385,8 @@ func (a *realAgent) execute(ctx context.Context, input string, opts *RunOptions)
 	if err != nil {
 		// Update metrics
 		a.updateMetrics(startTime, true)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
 
@@ -473,6 +495,23 @@ func (a *realAgent) execute(ctx context.Context, input string, opts *RunOptions)
 			"finish_reason": response.FinishReason,
 		},
 	}
+
+	if sc := span.SpanContext(); sc.IsValid() {
+		result.TraceID = sc.TraceID().String()
+	}
+
+	if runID := observability.RunIDFromContext(ctx); runID != "" {
+		span.SetAttributes(attribute.String(observability.AttrRunID, runID))
+	}
+
+	span.SetAttributes(
+		attribute.Int(observability.AttrLLMTokensIn, response.Usage.PromptTokens),
+		attribute.Int(observability.AttrLLMTokensOut, response.Usage.CompletionTokens),
+		attribute.Int(observability.AttrLLMMaxTokens, a.config.LLM.MaxTokens),
+		attribute.Float64(observability.AttrLLMTemperature, float64(a.config.LLM.Temperature)),
+	)
+
+	span.SetStatus(codes.Ok, "")
 
 	// Add tool names to ToolsCalled list for convenience
 	if len(toolCalls) > 0 {
@@ -751,25 +790,42 @@ func (a *realAgent) RunStream(ctx context.Context, input string, opts ...StreamO
 		Extra:     make(map[string]interface{}),
 	}
 
+	tracer := observability.GetTracer("agk.v1beta.agent")
+	streamCtx, span := tracer.Start(ctx, "agk.agent.run.stream",
+		trace.WithAttributes(
+			attribute.String(observability.AttrAgentName, a.config.Name),
+			attribute.String(observability.AttrLLMProvider, a.config.LLM.Provider),
+			attribute.String(observability.AttrLLMModel, a.config.LLM.Model),
+			attribute.Bool("agk.memory.enabled", a.memoryProvider != nil && a.config.Memory != nil),
+			attribute.Int("agk.tools.count", len(a.tools)),
+		),
+	)
+
 	// Add session ID if provided in context
-	if sessionID := ctx.Value("session_id"); sessionID != nil {
+	if sessionID := streamCtx.Value("session_id"); sessionID != nil {
 		if id, ok := sessionID.(string); ok {
 			metadata.SessionID = id
 		}
 	}
 
 	// Add trace ID if provided in context
-	if traceID := ctx.Value("trace_id"); traceID != nil {
+	if traceID := streamCtx.Value("trace_id"); traceID != nil {
 		if id, ok := traceID.(string); ok {
 			metadata.TraceID = id
 		}
 	}
 
+	if sc := span.SpanContext(); sc.IsValid() {
+		metadata.TraceID = sc.TraceID().String()
+		streamCtx = context.WithValue(streamCtx, "trace_id", metadata.TraceID)
+	}
+
 	// Create stream with options
-	stream, writer := NewStream(ctx, metadata, opts...)
+	stream, writer := NewStream(streamCtx, metadata, opts...)
 
 	// Start streaming in a goroutine
 	go func() {
+		defer span.End()
 		defer writer.Close()
 
 		startTime := time.Now()
@@ -816,8 +872,10 @@ func (a *realAgent) RunStream(ctx context.Context, input string, opts ...StreamO
 		}
 
 		// Start LLM streaming
-		tokenChan, err := a.llmProvider.Stream(ctx, prompt)
+		tokenChan, err := a.llmProvider.Stream(streamCtx, prompt)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			writer.Write(&StreamChunk{
 				Type:  ChunkTypeError,
 				Error: fmt.Errorf("failed to start LLM stream: %w", err),
@@ -879,8 +937,10 @@ func (a *realAgent) RunStream(ctx context.Context, input string, opts ...StreamO
 				finalResult.ToolsCalled = extractToolNames(toolCalls)
 
 				// Execute tools and stream the results
-				err := a.executeToolsAndStream(ctx, input, finalContent, toolCalls, writer)
+				err := a.executeToolsAndStream(streamCtx, input, finalContent, toolCalls, writer)
 				if err != nil {
+					span.RecordError(err)
+					span.SetStatus(codes.Error, err.Error())
 					writer.Write(&StreamChunk{
 						Type:  ChunkTypeError,
 						Error: fmt.Errorf("tool execution failed: %w", err),
@@ -904,6 +964,11 @@ func (a *realAgent) RunStream(ctx context.Context, input string, opts ...StreamO
 
 		// Update metrics
 		a.updateMetrics(startTime, false)
+		span.SetAttributes(
+			attribute.Int("agk.stream.tokens", tokenCount),
+			attribute.Int64(observability.AttrLLMLatencyMs, duration.Milliseconds()),
+		)
+		span.SetStatus(codes.Ok, "")
 
 		// Set final result on the stream
 		if s, ok := stream.(*basicStream); ok {

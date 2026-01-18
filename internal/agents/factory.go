@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/agenticgokit/agenticgokit/core"
+	"github.com/agenticgokit/agenticgokit/internal/observability"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // ConfigurableAgentFactory creates agents based on resolved configuration
@@ -24,12 +26,28 @@ func NewConfigurableAgentFactory(config *core.Config) *ConfigurableAgentFactory 
 
 // CreateAgent creates an agent from resolved configuration
 func (f *ConfigurableAgentFactory) CreateAgent(name string, resolvedConfig *core.ResolvedAgentConfig, llmProvider core.ModelProvider) (core.Agent, error) {
+	// Start observability span for agent creation
+	tracer := observability.GetTracer("agk.agents.factory")
+	ctx := context.Background()
+	ctx, span := tracer.Start(ctx, "agk.agent.create")
+	defer span.End()
+
+	// Set agent attributes on span
+	agentAttrs := observability.AgentAttributes(name, "configured")
+	span.SetAttributes(agentAttrs...)
+
 	if resolvedConfig == nil {
-		return nil, fmt.Errorf("resolved configuration is required for agent '%s'", name)
+		err := fmt.Errorf("resolved configuration is required for agent '%s'", name)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "missing config")
+		return nil, err
 	}
 
 	if !resolvedConfig.Enabled {
-		return nil, fmt.Errorf("agent '%s' is disabled in configuration", name)
+		err := fmt.Errorf("agent '%s' is disabled in configuration", name)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "agent disabled")
+		return nil, err
 	}
 
 	// Start building the agent using internal builder
@@ -39,6 +57,15 @@ func (f *ConfigurableAgentFactory) CreateAgent(name string, resolvedConfig *core
 	if llmProvider != nil && resolvedConfig.LLMConfig != nil {
 		llmConfig := f.createLLMConfigFromResolved(resolvedConfig.LLMConfig)
 		builder = builder.WithLLMAndConfig(llmProvider, llmConfig)
+		// Record LLM configuration in span
+		llmAttrs := observability.LLMAttributes(
+			resolvedConfig.LLMConfig.Provider,
+			resolvedConfig.LLMConfig.Model,
+			resolvedConfig.LLMConfig.Temperature,
+			resolvedConfig.LLMConfig.MaxTokens,
+		)
+		span.SetAttributes(llmAttrs...)
+		span.AddEvent("llm_added")
 	}
 
 	// Add MCP capability if MCP is enabled
@@ -52,6 +79,7 @@ func (f *ConfigurableAgentFactory) CreateAgent(name string, resolvedConfig *core
 				MaxRetries:           3,
 			})
 			builder = builder.WithCapability(mcpCapability)
+			span.AddEvent("mcp_capability_added")
 		}
 	}
 
@@ -75,6 +103,8 @@ func (f *ConfigurableAgentFactory) CreateAgent(name string, resolvedConfig *core
 	// Build the agent
 	agent, err := builder.Build()
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "builder failed")
 		return nil, fmt.Errorf("failed to build agent '%s': %w", name, err)
 	}
 
@@ -92,6 +122,7 @@ func (f *ConfigurableAgentFactory) CreateAgent(name string, resolvedConfig *core
 		OriginalConfig: f.config,
 	}
 
+	span.SetStatus(codes.Ok, "agent created successfully")
 	return configuredAgent, nil
 }
 
@@ -424,4 +455,3 @@ func init() {
 		return NewConfigurableAgentFactory(cfg)
 	})
 }
-

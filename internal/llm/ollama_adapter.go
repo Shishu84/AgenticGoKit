@@ -241,6 +241,10 @@ func (o *OllamaAdapter) Call(ctx context.Context, prompt Prompt) (Response, erro
 				} `json:"function"`
 			} `json:"tool_calls,omitempty"`
 		} `json:"message"`
+		// Ollama returns token accounting on completion
+		PromptEvalCount int   `json:"prompt_eval_count"`
+		EvalCount       int   `json:"eval_count"`
+		TotalDurationNs int64 `json:"total_duration"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		span.RecordError(err)
@@ -248,9 +252,30 @@ func (o *OllamaAdapter) Call(ctx context.Context, prompt Prompt) (Response, erro
 		return Response{}, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// Calculate latency
-	latencyMs := time.Since(startTime).Milliseconds()
-	span.SetAttributes(attribute.Int64("llm.latency_ms", latencyMs))
+	// Capture token usage and latency when available
+	if apiResp.PromptEvalCount > 0 {
+		span.SetAttributes(
+			attribute.Int(observability.AttrLLMPromptTokens, apiResp.PromptEvalCount),
+			attribute.Int(observability.AttrLLMTokensIn, apiResp.PromptEvalCount),
+		)
+	}
+	if apiResp.EvalCount > 0 {
+		span.SetAttributes(
+			attribute.Int(observability.AttrLLMCompletionTokens, apiResp.EvalCount),
+			attribute.Int(observability.AttrLLMTokensOut, apiResp.EvalCount),
+		)
+	}
+	if apiResp.PromptEvalCount > 0 || apiResp.EvalCount > 0 {
+		total := apiResp.PromptEvalCount + apiResp.EvalCount
+		span.SetAttributes(attribute.Int(observability.AttrLLMTotalTokens, total))
+	}
+	// Prefer server-reported duration; fallback to local measurement
+	if apiResp.TotalDurationNs > 0 {
+		span.SetAttributes(attribute.Int64(observability.AttrLLMLatencyMs, apiResp.TotalDurationNs/1_000_000))
+	} else {
+		latencyMs := time.Since(startTime).Milliseconds()
+		span.SetAttributes(attribute.Int64(observability.AttrLLMLatencyMs, latencyMs))
+	}
 
 	response := Response{
 		Content: apiResp.Message.Content,
@@ -416,6 +441,9 @@ func (o *OllamaAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 		// Track chunks and total bytes
 		chunkCount := 0
 		totalBytes := 0
+		promptTokens := 0
+		completionTokens := 0
+		serverDurationNs := int64(0)
 
 		decoder := json.NewDecoder(resp.Body)
 
@@ -430,9 +458,12 @@ func (o *OllamaAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 			}
 
 			var response struct {
-				Response string `json:"response"`
-				Done     bool   `json:"done"`
-				Error    string `json:"error,omitempty"`
+				Response        string `json:"response"`
+				Done            bool   `json:"done"`
+				Error           string `json:"error,omitempty"`
+				PromptEvalCount int    `json:"prompt_eval_count"`
+				EvalCount       int    `json:"eval_count"`
+				TotalDurationNs int64  `json:"total_duration"`
 			}
 
 			if err := decoder.Decode(&response); err != nil {
@@ -468,13 +499,44 @@ func (o *OllamaAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 			}
 
 			if response.Done {
+				// Capture token accounting if provided
+				if response.PromptEvalCount > 0 {
+					promptTokens = response.PromptEvalCount
+				}
+				if response.EvalCount > 0 {
+					completionTokens = response.EvalCount
+				}
+				if response.TotalDurationNs > 0 {
+					serverDurationNs = response.TotalDurationNs
+				}
+
 				// Record final metrics
 				latencyMs := time.Since(startTime).Milliseconds()
-				span.SetAttributes(
+				if serverDurationNs > 0 {
+					latencyMs = serverDurationNs / 1_000_000
+				}
+				attrs := []attribute.KeyValue{
 					attribute.Int("llm.stream.chunk_count", chunkCount),
 					attribute.Int("llm.stream.total_bytes", totalBytes),
-					attribute.Int64("llm.latency_ms", latencyMs),
-				)
+					attribute.Int64(observability.AttrLLMLatencyMs, latencyMs),
+				}
+				if promptTokens > 0 {
+					attrs = append(attrs,
+						attribute.Int(observability.AttrLLMPromptTokens, promptTokens),
+						attribute.Int(observability.AttrLLMTokensIn, promptTokens),
+					)
+				}
+				if completionTokens > 0 {
+					attrs = append(attrs,
+						attribute.Int(observability.AttrLLMCompletionTokens, completionTokens),
+						attribute.Int(observability.AttrLLMTokensOut, completionTokens),
+					)
+				}
+				if promptTokens+completionTokens > 0 {
+					total := promptTokens + completionTokens
+					attrs = append(attrs, attribute.Int(observability.AttrLLMTotalTokens, total))
+				}
+				span.SetAttributes(attrs...)
 				span.SetStatus(codes.Ok, "stream completed successfully")
 				return // Stream complete
 			}

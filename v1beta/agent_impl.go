@@ -16,6 +16,7 @@ import (
 	"github.com/agenticgokit/agenticgokit/core"
 	"github.com/agenticgokit/agenticgokit/internal/llm"
 	"github.com/agenticgokit/agenticgokit/internal/observability"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -1368,6 +1369,14 @@ func (a *realAgent) generateManifest() error {
 // executeTool looks up a tool by name and executes it with the given arguments.
 // Returns the tool result, including success status and any errors.
 func (a *realAgent) executeTool(ctx context.Context, toolCall ToolCall) ToolCall {
+	// Create observability span for tool execution
+	tracer := otel.Tracer("agenticgokit.tools")
+	ctx, span := tracer.Start(ctx, "agk.tool.call",
+		trace.WithAttributes(
+			attribute.String(observability.AttrToolName, toolCall.Name),
+		))
+	defer span.End()
+
 	startTime := time.Now()
 
 	// Initialize result fields
@@ -1386,8 +1395,20 @@ func (a *realAgent) executeTool(ctx context.Context, toolCall ToolCall) ToolCall
 	if tool == nil {
 		toolCall.Error = fmt.Sprintf("tool %q not found", toolCall.Name)
 		toolCall.Duration = time.Since(startTime)
+		span.RecordError(fmt.Errorf("tool not found"))
+		span.SetStatus(codes.Error, "tool not found")
+		span.SetAttributes(attribute.Int64(observability.AttrToolLatencyMs, toolCall.Duration.Milliseconds()))
 		return toolCall
 	}
+
+	// Record input size
+	inputSize := 0
+	if toolCall.Arguments != nil {
+		if jsonBytes, err := json.Marshal(toolCall.Arguments); err == nil {
+			inputSize = len(jsonBytes)
+		}
+	}
+	span.SetAttributes(attribute.Int("agk.tool.input_bytes", inputSize))
 
 	// Execute the tool
 	result, err := tool.Execute(ctx, toolCall.Arguments)
@@ -1399,12 +1420,18 @@ func (a *realAgent) executeTool(ctx context.Context, toolCall ToolCall) ToolCall
 		if result != nil {
 			toolCall.Result = result.Content
 		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "tool execution failed")
+		span.SetAttributes(attribute.Int64(observability.AttrToolLatencyMs, toolCall.Duration.Milliseconds()))
 		return toolCall
 	}
 
 	if result == nil {
 		toolCall.Error = "tool returned nil result"
 		toolCall.Success = false
+		span.RecordError(fmt.Errorf("tool returned nil result"))
+		span.SetStatus(codes.Error, "tool returned nil result")
+		span.SetAttributes(attribute.Int64(observability.AttrToolLatencyMs, toolCall.Duration.Milliseconds()))
 		return toolCall
 	}
 
@@ -1413,7 +1440,24 @@ func (a *realAgent) executeTool(ctx context.Context, toolCall ToolCall) ToolCall
 	toolCall.Result = result.Content
 	if !result.Success {
 		toolCall.Error = result.Error
+		span.SetStatus(codes.Error, result.Error)
+	} else {
+		span.SetStatus(codes.Ok, "tool execution successful")
 	}
+
+	// Record output size
+	outputSize := 0
+	if contentStr, ok := toolCall.Result.(string); ok {
+		outputSize = len(contentStr)
+	} else if contentBytes, ok := toolCall.Result.([]byte); ok {
+		outputSize = len(contentBytes)
+	}
+
+	span.SetAttributes(
+		attribute.Int64(observability.AttrToolLatencyMs, toolCall.Duration.Milliseconds()),
+		attribute.Int("agk.tool.output_bytes", outputSize),
+		attribute.Bool("agk.tool.success", toolCall.Success),
+	)
 
 	return toolCall
 }

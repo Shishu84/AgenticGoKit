@@ -2,9 +2,16 @@ package v1beta
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/agenticgokit/agenticgokit/core"
+	"github.com/agenticgokit/agenticgokit/internal/observability"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // =============================================================================
@@ -158,21 +165,71 @@ func (m *mcpToolWrapper) Description() string {
 }
 
 func (m *mcpToolWrapper) Execute(ctx context.Context, args map[string]interface{}) (*ToolResult, error) {
+	// Create observability span for MCP tool execution
+	tracer := otel.Tracer("agenticgokit.mcp")
+	ctx, span := tracer.Start(ctx, "agk.mcp.tool.call",
+		trace.WithAttributes(
+			attribute.String(observability.AttrToolName, m.name),
+			attribute.String(observability.AttrMCPServer, "unknown"), // ServerName not directly accessible here
+		))
+	defer span.End()
+
+	startTime := time.Now()
+
+	// Record input size
+	inputSize := 0
+	if len(args) > 0 {
+		if jsonBytes, err := json.Marshal(args); err == nil {
+			inputSize = len(jsonBytes)
+		}
+	}
+	span.SetAttributes(attribute.Int("agk.mcp.tool.input_bytes", inputSize))
+
 	// Execute through core MCP manager
 	mcpResult, err := ExecuteMCPTool(ctx, m.name, args)
 	if err != nil {
+		duration := time.Since(startTime)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "MCP tool execution failed")
+		span.SetAttributes(attribute.Int64(observability.AttrToolLatencyMs, duration.Milliseconds()))
 		return &ToolResult{Success: false, Error: err.Error()}, err
 	}
 
 	// Convert MCP result to vnext ToolResult
 	// vnext.ToolResult.Content is interface{}, so we use a flexible representation
 	var contents []map[string]interface{}
+	outputSize := 0
 	for _, content := range mcpResult.Content {
-		contents = append(contents, map[string]interface{}{
+		contentMap := map[string]interface{}{
 			"type": content.Type,
 			"text": content.Text,
 			"data": content.Data,
-		})
+		}
+		contents = append(contents, contentMap)
+
+		// Count bytes in content
+		if jsonBytes, err := json.Marshal(contentMap); err == nil {
+			outputSize += len(jsonBytes)
+		}
+	}
+
+	duration := time.Since(startTime)
+	resultStatus := codes.Ok
+	if !mcpResult.Success {
+		resultStatus = codes.Error
+	}
+
+	span.SetAttributes(
+		attribute.Int64(observability.AttrToolLatencyMs, duration.Milliseconds()),
+		attribute.Int("agk.mcp.tool.output_bytes", outputSize),
+		attribute.Bool("agk.mcp.tool.success", mcpResult.Success),
+		attribute.Int("agk.mcp.tool.content_count", len(mcpResult.Content)),
+	)
+
+	if !mcpResult.Success {
+		span.SetStatus(resultStatus, "MCP tool returned success=false")
+	} else {
+		span.SetStatus(resultStatus, "MCP tool execution successful")
 	}
 
 	return &ToolResult{

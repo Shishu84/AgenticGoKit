@@ -37,14 +37,15 @@ type Config struct {
 
 // LLMConfig contains LLM provider configuration
 type LLMConfig struct {
-	Provider    string  `toml:"provider"`            // openai, ollama, azure, anthropic, openrouter
-	Model       string  `toml:"model"`               // Model name
-	Temperature float32 `toml:"temperature"`         // 0.0 to 2.0
-	MaxTokens   int     `toml:"max_tokens"`          // Maximum tokens to generate
-	BaseURL     string  `toml:"base_url,omitempty"`  // Custom base URL
-	APIKey      string  `toml:"api_key,omitempty"`   // API key (prefer env vars)
-	SiteURL     string  `toml:"site_url,omitempty"`  // OpenRouter: Site URL for rankings
-	SiteName    string  `toml:"site_name,omitempty"` // OpenRouter: Site name for analytics
+	Provider    string        `toml:"provider"`               // openai, ollama, azure, anthropic, openrouter
+	Model       string        `toml:"model"`                  // Model name
+	Temperature float32       `toml:"temperature"`            // 0.0 to 2.0
+	MaxTokens   int           `toml:"max_tokens"`             // Maximum tokens to generate
+	BaseURL     string        `toml:"base_url,omitempty"`     // Custom base URL
+	HTTPTimeout time.Duration `toml:"http_timeout,omitempty"` // HTTP client timeout for LLM requests
+	APIKey      string        `toml:"api_key,omitempty"`      // API key (prefer env vars)
+	SiteURL     string        `toml:"site_url,omitempty"`     // OpenRouter: Site URL for rankings
+	SiteName    string        `toml:"site_name,omitempty"`    // OpenRouter: Site name for analytics
 	// Azure specific fields
 	Endpoint            string `toml:"endpoint,omitempty"`
 	ChatDeployment      string `toml:"chat_deployment,omitempty"`
@@ -155,12 +156,31 @@ type LoopConditionFunc func(ctx context.Context, iteration int, lastResult *Work
 
 // WorkflowConfig contains workflow orchestration settings
 type WorkflowConfig struct {
-	Mode          WorkflowMode      `toml:"mode"`
-	Agents        []string          `toml:"agents"`
-	Timeout       time.Duration     `toml:"timeout"`
-	MaxIterations int               `toml:"max_iterations"`
-	Memory        *MemoryConfig     `toml:"memory,omitempty"`
-	LoopCondition LoopConditionFunc `toml:"-"` // Custom loop exit condition (not serializable)
+	Mode          WorkflowMode       `toml:"mode"`
+	Name          string             `toml:"name"`
+	Agents        []string           `toml:"agents"`
+	Timeout       time.Duration      `toml:"timeout"`
+	MaxIterations int                `toml:"max_iterations"`
+	Memory        *MemoryConfig      `toml:"memory,omitempty"`
+	LLM           *LLMConfig         `toml:"llm,omitempty"`        // Shared LLM config
+	AgentDefs     []WorkflowAgentDef `toml:"agent_defs,omitempty"` // Agent definitions
+	StepDefs      []WorkflowStepDef  `toml:"step_defs,omitempty"`  // Step definitions
+	LoopCondition LoopConditionFunc  `toml:"-"`                    // Custom loop exit condition (not serializable)
+}
+
+// WorkflowAgentDef defines an agent within a workflow
+type WorkflowAgentDef struct {
+	Name         string  `toml:"name"`
+	SystemPrompt string  `toml:"system_prompt"`
+	Temperature  float64 `toml:"temperature"`
+	MaxTokens    int     `toml:"max_tokens,omitempty"`
+}
+
+// WorkflowStepDef defines a step within a workflow
+type WorkflowStepDef struct {
+	Name      string   `toml:"name"`
+	Agent     string   `toml:"agent"`
+	DependsOn []string `toml:"depends_on,omitempty"`
 }
 
 // WorkflowMode defines workflow execution modes

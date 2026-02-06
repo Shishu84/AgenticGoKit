@@ -31,7 +31,7 @@ type OllamaAdapter struct {
 
 // NewOllamaAdapter creates a new OllamaAdapter instance.
 // baseURL should include scheme and host, e.g. http://localhost:11434
-func NewOllamaAdapter(baseURL, model string, maxTokens int, temperature float32) (*OllamaAdapter, error) {
+func NewOllamaAdapter(baseURL, model string, maxTokens int, temperature float32, httpTimeout time.Duration) (*OllamaAdapter, error) {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
@@ -44,10 +44,13 @@ func NewOllamaAdapter(baseURL, model string, maxTokens int, temperature float32)
 	if temperature == 0 {
 		temperature = 0.7 // Default temperature
 	}
+	if httpTimeout == 0 {
+		httpTimeout = 120 * time.Second // Default timeout
+	}
 
 	// Reuse one HTTP client with keep-alive to avoid connection churn and model reload latency
 	// Use optimized transport configuration for best performance
-	client := NewOptimizedHTTPClient(120 * time.Second)
+	client := NewOptimizedHTTPClient(httpTimeout)
 
 	return &OllamaAdapter{
 		baseURL:        baseURL,

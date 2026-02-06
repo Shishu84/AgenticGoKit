@@ -251,8 +251,8 @@ func NewOpenAIAdapterWrapped(apiKey, model string, maxTokens int, temperature fl
 	return NewModelProviderWrapper(adapter), nil
 }
 
-func NewOllamaAdapterWrapped(baseURL, model string, maxTokens int, temperature float32) (PublicModelProvider, error) {
-	adapter, err := NewOllamaAdapter(baseURL, model, maxTokens, temperature)
+func NewOllamaAdapterWrapped(baseURL, model string, maxTokens int, temperature float32, httpTimeout time.Duration) (PublicModelProvider, error) {
+	adapter, err := NewOllamaAdapter(baseURL, model, maxTokens, temperature, httpTimeout)
 	if err != nil {
 		return nil, err
 	}

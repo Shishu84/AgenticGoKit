@@ -35,6 +35,7 @@ func createLLMProvider(config LLMConfig) (llm.ModelProvider, error) {
 		MaxTokens:           config.MaxTokens,
 		Temperature:         config.Temperature,
 		BaseURL:             config.BaseURL,
+		HTTPTimeout:         config.HTTPTimeout,         // HTTP client timeout
 		Endpoint:            config.Endpoint,            // For Azure
 		ChatDeployment:      config.ChatDeployment,      // For Azure
 		EmbeddingDeployment: config.EmbeddingDeployment, // For Azure

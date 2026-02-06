@@ -224,7 +224,7 @@ func (f *ProviderFactory) createOllamaProvider(config ProviderConfig) (ModelProv
 		model = "llama3.2:latest" // Default model
 	}
 
-	return NewOllamaAdapter(baseURL, model, config.MaxTokens, config.Temperature)
+	return NewOllamaAdapter(baseURL, model, config.MaxTokens, config.Temperature, config.HTTPTimeout)
 }
 
 // createOpenRouterProvider creates an OpenRouter provider

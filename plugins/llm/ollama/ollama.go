@@ -65,7 +65,7 @@ func (a *providerAdapter) Embeddings(ctx context.Context, texts []string) ([][]f
 }
 
 func factory(cfg core.LLMProviderConfig) (core.ModelProvider, error) {
-	wrapper, err := llm.NewOllamaAdapterWrapped(cfg.BaseURL, cfg.Model, cfg.MaxTokens, float32(cfg.Temperature))
+	wrapper, err := llm.NewOllamaAdapterWrapped(cfg.BaseURL, cfg.Model, cfg.MaxTokens, float32(cfg.Temperature), cfg.HTTPTimeout)
 	if err != nil {
 		return nil, err
 	}

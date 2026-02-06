@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -2165,3 +2166,104 @@ Accessing workflow results:
 			stepResult.Tokens)
 	}
 */
+
+// =============================================================================
+// TOML CONFIG LOADER
+// =============================================================================
+
+// LoadWorkflowFromTOML loads a workflow from a TOML configuration file
+// This provides a convenient way to initialize workflows from config files
+func LoadWorkflowFromTOML(configPath string) (Workflow, error) {
+	// Check if file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("configuration file not found: %s", configPath)
+	}
+
+	// Read the file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read configuration file %s: %w", configPath, err)
+	}
+
+	// Parse TOML into ProjectConfig which has workflow support
+	var projectConfig ProjectConfig
+	if err := toml.Unmarshal(data, &projectConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse TOML configuration: %w", err)
+	}
+
+	// Check if workflow config exists (mode should be set)
+	if projectConfig.Workflow.Mode == "" {
+		return nil, fmt.Errorf("no workflow configuration found in %s (workflow.mode must be set)", configPath)
+	}
+
+	// Create the workflow
+	workflow, err := NewWorkflow(&projectConfig.Workflow)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create workflow: %w", err)
+	}
+
+	// Build agents from agent_defs
+	agentMap := make(map[string]Agent)
+	for _, agentDef := range projectConfig.Workflow.AgentDefs {
+		// Build agent using the builder API with options
+		var opts []Option
+
+		// Set system prompt
+		if agentDef.SystemPrompt != "" {
+			opts = append(opts, WithSystemPrompt(agentDef.SystemPrompt))
+		}
+
+		// Set LLM config if available
+		if projectConfig.Workflow.LLM != nil {
+			llmConfig := projectConfig.Workflow.LLM
+			temperature := agentDef.Temperature
+			if temperature == 0 {
+				temperature = float64(llmConfig.Temperature)
+			}
+			maxTokens := agentDef.MaxTokens
+			if maxTokens == 0 {
+				maxTokens = llmConfig.MaxTokens
+			}
+
+			// Use a custom option to set the full LLM config including timeout and base URL
+			opts = append(opts, func(c *Config) {
+				c.LLM.Provider = llmConfig.Provider
+				c.LLM.Model = llmConfig.Model
+				c.LLM.Temperature = float32(temperature)
+				c.LLM.MaxTokens = maxTokens
+				c.LLM.BaseURL = llmConfig.BaseURL
+				c.LLM.HTTPTimeout = llmConfig.HTTPTimeout
+			})
+		}
+
+		// Create the agent using builder
+		agent, err := NewChatAgent(agentDef.Name, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create agent %s: %w", agentDef.Name, err)
+		}
+
+		agentMap[agentDef.Name] = agent
+	}
+
+	// Build steps from step_defs
+	for _, stepDef := range projectConfig.Workflow.StepDefs {
+		agent, ok := agentMap[stepDef.Agent]
+		if !ok {
+			return nil, fmt.Errorf("step %s references undefined agent %s", stepDef.Name, stepDef.Agent)
+		}
+
+		// Create workflow step
+		step := WorkflowStep{
+			Name:         stepDef.Name,
+			Agent:        agent,
+			Dependencies: stepDef.DependsOn,
+		}
+
+		// Add the step to the workflow
+		if err := workflow.AddStep(step); err != nil {
+			return nil, fmt.Errorf("failed to add step %s: %w", stepDef.Name, err)
+		}
+	}
+
+	return workflow, nil
+}

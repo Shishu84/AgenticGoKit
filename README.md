@@ -32,6 +32,22 @@
 
 ---
 
+## Part of the AgenticGoKit Ecosystem
+
+AgenticGoKit is one part of a **three-part ecosystem** designed to take you from idea to production:
+
+| Part | Repository | Purpose |
+|------|------------|--------|
+| **Core Framework** | [AgenticGoKit](https://github.com/AgenticGoKit/AgenticGoKit) | Build multi-agent systems with memory, RAG, tools, and orchestration. |
+| **Developer Tooling** | [AGK CLI](https://github.com/AgenticGoKit/agk) | Scaffold, trace, evaluate, and manage agent workflows from the command line. |
+| **Template Registry** | [agk-templates](https://github.com/agk-templates) | Official templates powering AGK scaffolds and integrations. |
+
+**Typical flow:** **Design** with the core framework → **Scaffold** with AGK using official templates → **Build & ship** with your preferred deployment stack.
+
+> 📦 Explore the full ecosystem at the [AgenticGoKit Organization](https://github.com/AgenticGoKit).
+
+---
+
 ## Quick Start
 
 **Start building immediately with the modern v1beta API:**
@@ -191,8 +207,11 @@ By using `v1beta` today, you're getting access to the latest features and helpin
 - **Website**: [www.agenticgokit.com](https://www.agenticgokit.com)
 - **Documentation**: [docs.agenticgokit.com](https://docs.agenticgokit.com)
 - **Examples**: [examples/](examples/)
+- **AGK CLI**: [github.com/AgenticGoKit/agk](https://github.com/AgenticGoKit/agk)
+- **Template Registry**: [github.com/agk-templates](https://github.com/agk-templates)
 - **Discussions**: [GitHub Discussions](https://github.com/kunalkushwaha/agenticgokit/discussions)
 - **Issues**: [GitHub Issues](https://github.com/kunalkushwaha/agenticgokit/issues)
+- **Discord**: [Join the Community](https://discord.gg/64BnqpcGfN)
 
 ## Contributing
 

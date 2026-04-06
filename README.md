@@ -59,9 +59,8 @@ import (
     "context"
     "fmt"
     "log"
-    "time"
-    
-    "github.com/agenticgokit/agenticgokit/v1beta"
+
+"github.com/agenticgokit/agenticgokit/v1beta"
 )
 
 func main() {

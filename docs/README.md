@@ -135,7 +135,7 @@ Build production systems for:
 - **Customer Support**: Multi-agent systems with memory and tool integration
 - **Content Generation**: Sequential and parallel workflows for content creation
 - **Research Systems**: RAG-powered agents with knowledge base access
-- - **Data Processing**: ETL pipelines with validation and transformation
+- **Data Processing**: ETL pipelines with validation and transformation
 - **Code Analysis**: Iterative refinement loops for quality assurance
 
 ---

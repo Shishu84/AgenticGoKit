@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	vnext "github.com/agenticgokit/agenticgokit/v1beta"
+	v1beta "github.com/agenticgokit/agenticgokit/v1beta"
 )
 
 func main() {
-	fmt.Println("🚀 AgenticGoKit vNext Streaming Demo")
+	fmt.Println("🚀 AgenticGoKit v1beta Streaming Demo")
 	fmt.Println("=====================================")
 	fmt.Println()
 
@@ -90,14 +90,14 @@ func demoBasicStreaming() {
 		}
 
 		switch chunk.Type {
-		case vnext.ChunkTypeDelta:
+		case v1beta.ChunkTypeDelta:
 			// Print each token as it arrives
 			fmt.Print(chunk.Delta)
 			fullResponse += chunk.Delta
 			chunkCount++
-		case vnext.ChunkTypeDone:
+		case v1beta.ChunkTypeDone:
 			fmt.Println("\n\n✅ Stream completed!")
-		case vnext.ChunkTypeMetadata:
+		case v1beta.ChunkTypeMetadata:
 			fmt.Printf("\n📊 Metadata: %v\n", chunk.Metadata)
 		}
 	}
@@ -158,7 +158,7 @@ func demoStreamingWithOptions() {
 
 	// Process different chunk types
 	var textContent, thoughts string
-	chunkCounts := make(map[vnext.ChunkType]int)
+	chunkCounts := make(map[v1beta.ChunkType]int)
 
 	for chunk := range stream.Chunks() {
 		if chunk.Error != nil {
@@ -169,17 +169,17 @@ func demoStreamingWithOptions() {
 		chunkCounts[chunk.Type]++
 
 		switch chunk.Type {
-		case vnext.ChunkTypeDelta:
+		case v1beta.ChunkTypeDelta:
 			fmt.Print(chunk.Delta)
 			textContent += chunk.Delta
-		case vnext.ChunkTypeThought:
+		case v1beta.ChunkTypeThought:
 			fmt.Printf("\n💭 Thought: %s\n", chunk.Delta)
 			thoughts += chunk.Delta
-		case vnext.ChunkTypeToolCall:
+		case v1beta.ChunkTypeToolCall:
 			fmt.Printf("\n🔧 Tool Call: %s\n", chunk.Delta)
-		case vnext.ChunkTypeMetadata:
+		case v1beta.ChunkTypeMetadata:
 			fmt.Printf("\n📊 Metadata: %v\n", chunk.Metadata)
-		case vnext.ChunkTypeDone:
+		case v1beta.ChunkTypeDone:
 			fmt.Println("\n\n✅ Stream completed!")
 		}
 	} // Show chunk type statistics
@@ -299,9 +299,9 @@ func demoInteractiveStreaming() {
 				break
 			}
 
-			if chunk.Type == vnext.ChunkTypeDelta {
+			if chunk.Type == v1beta.ChunkTypeDelta {
 				fmt.Print(chunk.Delta)
-			} else if chunk.Type == vnext.ChunkTypeDone {
+			} else if chunk.Type == v1beta.ChunkTypeDone {
 				fmt.Println("\n")
 				break
 			}
@@ -310,7 +310,7 @@ func demoInteractiveStreaming() {
 		cancel()
 	}
 } // Helper function to stream with any provider
-func streamWithProvider(agent vnext.Agent, prompt, providerName string) {
+func streamWithProvider(agent v1beta.Agent, prompt, providerName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -330,11 +330,11 @@ func streamWithProvider(agent vnext.Agent, prompt, providerName string) {
 			break
 		}
 
-		if chunk.Type == vnext.ChunkTypeDelta {
+		if chunk.Type == v1beta.ChunkTypeDelta {
 			fmt.Print(chunk.Delta)
 			response += chunk.Delta
 			chunkCount++
-		} else if chunk.Type == vnext.ChunkTypeDone {
+		} else if chunk.Type == v1beta.ChunkTypeDone {
 			break
 		}
 	}
@@ -345,12 +345,12 @@ func streamWithProvider(agent vnext.Agent, prompt, providerName string) {
 }
 
 // Agent creation helpers
-func createOllamaAgent() (vnext.Agent, error) {
-	config := &vnext.Config{
+func createOllamaAgent() (v1beta.Agent, error) {
+	config := &v1beta.Config{
 		Name:         "streaming-demo-ollama",
 		SystemPrompt: "You are a helpful assistant. Provide clear, concise responses.",
 		Timeout:      60 * time.Second,
-		LLM: vnext.LLMConfig{
+		LLM: v1beta.LLMConfig{
 			Provider:    "ollama",
 			Model:       "gemma3:1b", // Fast small model for demo
 			Temperature: 0.7,
@@ -359,18 +359,18 @@ func createOllamaAgent() (vnext.Agent, error) {
 		},
 	}
 
-	return vnext.NewBuilder("streaming-demo").
+	return v1beta.NewBuilder("streaming-demo").
 		WithConfig(config).
-		WithPreset(vnext.ChatAgent).
+		WithPreset(v1beta.ChatAgent).
 		Build()
 }
 
-func createOpenAIAgent() (vnext.Agent, error) {
-	config := &vnext.Config{
+func createOpenAIAgent() (v1beta.Agent, error) {
+	config := &v1beta.Config{
 		Name:         "streaming-demo-openai",
 		SystemPrompt: "You are a helpful assistant. Provide clear, concise responses.",
 		Timeout:      60 * time.Second,
-		LLM: vnext.LLMConfig{
+		LLM: v1beta.LLMConfig{
 			Provider:    "openai",
 			Model:       "gpt-4o-mini",
 			Temperature: 0.7,
@@ -379,18 +379,18 @@ func createOpenAIAgent() (vnext.Agent, error) {
 		},
 	}
 
-	return vnext.NewBuilder("streaming-demo").
+	return v1beta.NewBuilder("streaming-demo").
 		WithConfig(config).
-		WithPreset(vnext.ChatAgent).
+		WithPreset(v1beta.ChatAgent).
 		Build()
 }
 
-func createAzureAgent() (vnext.Agent, error) {
-	config := &vnext.Config{
+func createAzureAgent() (v1beta.Agent, error) {
+	config := &v1beta.Config{
 		Name:         "streaming-demo-azure",
 		SystemPrompt: "You are a helpful assistant. Provide clear, concise responses.",
 		Timeout:      60 * time.Second,
-		LLM: vnext.LLMConfig{
+		LLM: v1beta.LLMConfig{
 			Provider:    "azure",
 			Model:       "gpt-4o-mini",
 			Temperature: 0.7,
@@ -400,9 +400,9 @@ func createAzureAgent() (vnext.Agent, error) {
 		},
 	}
 
-	return vnext.NewBuilder("streaming-demo").
+	return v1beta.NewBuilder("streaming-demo").
 		WithConfig(config).
-		WithPreset(vnext.ChatAgent).
+		WithPreset(v1beta.ChatAgent).
 		Build()
 }
 
